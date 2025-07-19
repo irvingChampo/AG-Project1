@@ -1,0 +1,4 @@
+deap
+PySide6
+matplotlib
+numpy
