@@ -1,418 +1,265 @@
+# ================================================
+# FILE: core/genetic.py
+# ================================================
+# Este archivo contiene el "cerebro" del proyecto: la implementación del algoritmo genético.
+# Aquí se define cómo se evalúa una solución, cómo se cruzan, mutan y seleccionan los individuos.
+
 import random
 import numpy as np
 from deap import base, creator, tools, algorithms
 import math
 
+# =============================================================================
+# === SECCIÓN 1: FUNCIONES DE EVALUACIÓN (CÁLCULO DE LA APTITUD) ================
+# =============================================================================
+# Estas funciones calculan qué "tan buena" es una solución (un individuo).
+# La aptitud se compone de dos partes: el puntaje por visión y la penalización por compatibilidad.
+
 def score_vista(individual, students, seats, seat_distances, d_max):
     """
-    Puntaje de vista mejorado con mejor diferenciación entre tipos de visión
+    FÓRMULA 1: PUNTAJE DE VISTA
+    Calcula un puntaje basado en la correcta ubicación de los estudiantes según su visión.
+    - Maximiza el puntaje si los estudiantes que 'no ven de lejos' están cerca del pizarrón.
+    - Maximiza el puntaje si los estudiantes que 'no ven de cerca' están lejos.
     """
     v_total = 0
     for i, seat_idx in enumerate(individual):
         student = students[i]
         seat = seats[seat_idx]
-        d = seat_distances[seat]
-        
+        d = seat_distances[seat]  # Distancia del asiento al pizarrón (número de fila)
+
         if student.vision == "no_far":  # No ve bien de lejos (necesita estar cerca)
-            # Puntaje alto para asientos cerca del pizarrón
-            v_i = max(0, 1.0 - (d / d_max)) * 2.0  # Multiplicador para dar más peso
+            # El puntaje es más alto cuanto menor es la distancia 'd'.
+            # El multiplicador 2.0 da más importancia a este tipo de estudiante.
+            v_i = max(0, 1.0 - (d / d_max)) * 2.0
         elif student.vision == "no_near":  # No ve bien de cerca (mejor atrás)
-            # Puntaje alto para asientos lejos del pizarrón
+            # El puntaje es más alto cuanto mayor es la distancia 'd'.
             v_i = (d / d_max) * 1.5
         else:  # Visión normal
-            v_i = 0.8  # Puntaje base moderado
-        
+            v_i = 0.8  # Puntaje base para no penalizar ubicaciones intermedias.
+
         v_total += v_i
-    
-    return v_total / len(students)
+
+    return v_total / len(students) # Se normaliza por el número de estudiantes.
 
 def penalizacion_compatibilidad(individual, students, seats, compatibility_matrix):
     """
-    Penalización mejorada por proximidad entre estudiantes compatibles
-    VALORES ALTOS = MALA FORMACIÓN (más penalización)
+    FÓRMULA 2: PENALIZACIÓN POR COMPATIBILIDAD
+    Calcula una penalización si los estudiantes que se distraen mutuamente están sentados cerca.
+    - La penalización es MÁS ALTA cuanto más cerca están.
+    - Una solución ideal tendría una penalización de 0.
+    - VALORES ALTOS = MALA DISTRIBUCIÓN (más penalización).
     """
     total_penalty = 0
     penalty_count = 0
     n = len(individual)
-    
+
     for i in range(n):
-        for j in range(i+1, n):
-            # Si son compatibles (se distraen mutuamente)
+        for j in range(i + 1, n):
+            # Si son compatibles (se distraen, compatibility_matrix[i][j] == 1)
             if compatibility_matrix[i][j] == 1:
                 seat_i = seats[individual[i]]
                 seat_j = seats[individual[j]]
-                
-                # Calcular distancia euclidiana
+
+                # Calcular distancia euclidiana entre los asientos
                 dist_euc = math.sqrt((seat_i[0] - seat_j[0]) ** 2 + (seat_i[1] - seat_j[1]) ** 2)
-                
-                # Penalización progresiva basada en distancia
-                if dist_euc == 0:  # Mismo asiento (imposible, pero por seguridad)
-                    penalty = 100.0
-                elif dist_euc <= 1.0:  # Adyacentes directos
+
+                # Penalización progresiva: más alta para distancias más cortas.
+                if dist_euc <= 1.0:    # Adyacentes directos
                     penalty = 50.0
-                elif dist_euc <= 1.41:  # Diagonales adyacentes
+                elif dist_euc <= 1.42: # Diagonales cercanos (sqrt(2))
                     penalty = 25.0
-                elif dist_euc <= 2.0:  # Segunda fila de proximidad
+                elif dist_euc <= 2.0:  # Un asiento de por medio
                     penalty = 10.0
-                elif dist_euc <= 2.83:  # Diagonales de segunda fila
-                    penalty = 5.0
-                elif dist_euc <= 3.0:  # Tercera proximidad
-                    penalty = 2.0
-                else:  # Suficientemente separados
+                else:                  # Suficientemente separados
                     penalty = 0.0
                 
                 total_penalty += penalty
                 penalty_count += 1
     
-    # Normalizar por el número de pares compatibles
+    # Se normaliza por el número de pares conflictivos para no depender del total de incompatibilidades.
     return total_penalty / max(penalty_count, 1)
 
 def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, w1=0.4, w2=0.6):
     """
-    Función de evaluación balanceada con mayor peso en separación de compatibles
+    FUNCIÓN DE APTITUD (FITNESS) PRINCIPAL
+    Esta función combina el puntaje de visión y la penalización de compatibilidad en un único valor de "aptitud".
+    El algoritmo genético intentará MAXIMIZAR este valor.
+
+    Fórmula: fitness = (w1 * puntaje_vision) - (w2 * penalizacion_compatibilidad)
+
+    - w1 y w2 son los pesos que determinan qué criterio es más importante.
+      Aquí se da más peso (0.6) a separar a los estudiantes conflictivos.
     """
     v_score = score_vista(individual, students, seats, seat_distances, d_max)
     c_penalty = penalizacion_compatibilidad(individual, students, seats, compatibility_matrix)
-    
-    # Normalizar el puntaje de vista para que esté en escala similar
-    v_normalized = v_score / 2.0  # Asumiendo que el máximo es ~2.0
-    
-    # Función objetivo: maximizar vista, minimizar penalización
-    fitness = w1 * v_normalized - w2 * (c_penalty / 50.0)  # Normalizar penalización
-    
-    return (fitness,)
+
+    # Normalización para que ambos términos de la fórmula estén en una escala similar.
+    v_normalized = v_score / 2.0
+    p_normalized = c_penalty / 50.0
+
+    # Función objetivo: maximizar vista, minimizar penalización.
+    fitness = (w1 * v_normalized) - (w2 * p_normalized)
+
+    return (fitness,) # DEAP requiere que el fitness se devuelva como una tupla.
+
+
+# =============================================================================
+# === SECCIÓN 2: OPERADORES AUXILIARES (REPARACIÓN Y CREACIÓN INTELIGENTE) ======
+# =============================================================================
 
 def feasible(individual):
-    """Verifica que no haya asientos duplicados"""
+    """Verifica que un individuo sea válido (que no haya asientos duplicados)."""
     return len(set(individual)) == len(individual)
 
 def repair(individual, seats_count):
-    """Repara individuos con asientos duplicados"""
-    available_seats = list(range(seats_count))
+    """Repara un individuo inválido reemplazando los asientos duplicados por otros disponibles."""
     used_seats = set()
+    duplicates = []
     
-    for i in range(len(individual)):
-        if individual[i] in used_seats:
-            # Buscar un asiento disponible
-            for seat in available_seats:
-                if seat not in used_seats:
-                    individual[i] = seat
-                    used_seats.add(seat)
-                    break
+    # Encuentra los asientos usados y los duplicados
+    for i, seat in enumerate(individual):
+        if seat in used_seats:
+            duplicates.append(i)
         else:
-            used_seats.add(individual[i])
+            used_seats.add(seat)
+            
+    # Encuentra los asientos que no se usaron
+    available_seats = [s for s in range(seats_count) if s not in used_seats]
+    random.shuffle(available_seats)
     
+    # Asigna asientos disponibles a las posiciones duplicadas
+    for i in duplicates:
+        if available_seats:
+            individual[i] = available_seats.pop()
+            
     return individual
 
 def create_smart_individual(students, seats, compatibility_matrix, seat_distances):
     """
-    Crea un individuo inicial inteligente que considera ambos criterios
+    Crea un individuo inicial de forma "inteligente" en lugar de aleatoria.
+    Esto ayuda al algoritmo a converger más rápido a una buena solución.
     """
+    # Esta es una función heurística que intenta hacer una buena primera asignación.
     num_students = len(students)
-    num_seats = len(seats)
-    
-    # Clasificar estudiantes por tipo de visión
-    students_no_far = [(i, s) for i, s in enumerate(students) if s.vision == "no_far"]
-    students_no_near = [(i, s) for i, s in enumerate(students) if s.vision == "no_near"]
-    students_normal = [(i, s) for i, s in enumerate(students) if s.vision == "normal"]
-    
-    # Ordenar asientos por distancia al pizarrón
-    seats_by_distance = sorted(range(num_seats), key=lambda x: seat_distances[seats[x]])
-    
-    # Inicializar asignación
     individual = [-1] * num_students
-    seats_disponibles = set(range(num_seats))
+    available_seats = list(range(len(seats)))
     
-    # Paso 1: Asignar estudiantes que no ven bien de lejos a primeras filas
-    for idx, (student_idx, student) in enumerate(students_no_far):
-        if seats_by_distance and seats_by_distance[0] in seats_disponibles:
-            best_seat = find_best_seat_avoiding_conflicts(
-                student_idx, seats_disponibles, individual, students, 
-                seats, compatibility_matrix, prefer_front=True
-            )
-            if best_seat is not None:
-                individual[student_idx] = best_seat
-                seats_disponibles.remove(best_seat)
-    
-    # Paso 2: Asignar estudiantes que no ven bien de cerca a filas posteriores
-    seats_back = [s for s in seats_by_distance if s in seats_disponibles]
-    seats_back.reverse()  # Empezar por atrás
-    
-    for student_idx, student in students_no_near:
-        best_seat = find_best_seat_avoiding_conflicts(
-            student_idx, seats_disponibles, individual, students,
-            seats, compatibility_matrix, prefer_front=False
-        )
-        if best_seat is not None:
-            individual[student_idx] = best_seat
-            seats_disponibles.remove(best_seat)
-    
-    # Paso 3: Asignar estudiantes con visión normal
-    for student_idx, student in students_normal:
-        best_seat = find_best_seat_avoiding_conflicts(
-            student_idx, seats_disponibles, individual, students,
-            seats, compatibility_matrix, prefer_front=None
-        )
-        if best_seat is not None:
-            individual[student_idx] = best_seat
-            seats_disponibles.remove(best_seat)
-    
-    # Paso 4: Asignar asientos restantes aleatoriamente
-    remaining_students = [i for i in range(num_students) if individual[i] == -1]
-    remaining_seats = list(seats_disponibles)
-    
-    for student_idx in remaining_students:
-        if remaining_seats:
-            seat_idx = random.choice(remaining_seats)
+    # Prioridad 1: Asignar estudiantes con problemas de visión
+    # 'no_far' a los asientos de adelante
+    no_far_students = [i for i, s in enumerate(students) if s.vision == "no_far"]
+    front_seats = sorted(range(len(seats)), key=lambda s: seat_distances[seats[s]])
+    for student_idx in no_far_students:
+        if front_seats:
+            seat_idx = front_seats.pop(0)
             individual[student_idx] = seat_idx
-            remaining_seats.remove(seat_idx)
-    
+            available_seats.remove(seat_idx)
+
+    # 'no_near' a los asientos de atrás
+    no_near_students = [i for i, s in enumerate(students) if s.vision == "no_near"]
+    back_seats = sorted([s for s in available_seats], key=lambda s: seat_distances[seats[s]], reverse=True)
+    for student_idx in no_near_students:
+        if back_seats:
+            seat_idx = back_seats.pop(0)
+            individual[student_idx] = seat_idx
+            available_seats.remove(seat_idx)
+            
+    # Asignar el resto de estudiantes a los asientos restantes
+    remaining_students = [i for i, s in enumerate(students) if individual[i] == -1]
+    random.shuffle(available_seats)
+    for student_idx in remaining_students:
+        if available_seats:
+            seat_idx = available_seats.pop(0)
+            individual[student_idx] = seat_idx
+            
     return individual
 
-def find_best_seat_avoiding_conflicts(student_idx, available_seats, current_assignment, 
-                                    students, seats, compatibility_matrix, prefer_front=None):
-    """
-    Encuentra el mejor asiento evitando conflictos con estudiantes ya asignados
-    """
-    if not available_seats:
-        return None
-    
-    best_seat = None
-    best_score = float('-inf')
-    
-    for seat_idx in available_seats:
-        score = 0
-        seat_pos = seats[seat_idx]
-        
-        # Bonificación por preferencia de ubicación
-        if prefer_front is True:
-            score += (10 - seat_pos[0])  # Menor número de fila = más cerca
-        elif prefer_front is False:
-            score += seat_pos[0]  # Mayor número de fila = más lejos
-        
-        # Penalización por compatibilidades conflictivas
-        for other_student_idx, other_seat_idx in enumerate(current_assignment):
-            if (other_seat_idx != -1 and 
-                compatibility_matrix[student_idx][other_student_idx] == 1):
-                
-                other_seat_pos = seats[other_seat_idx]
-                dist = math.sqrt((seat_pos[0] - other_seat_pos[0])**2 + 
-                               (seat_pos[1] - other_seat_pos[1])**2)
-                
-                # Bonificar distancias mayores
-                if dist > 3.0:
-                    score += 10
-                elif dist > 2.0:
-                    score += 5
-                elif dist > 1.41:
-                    score += 2
-                else:
-                    score -= 20  # Penalizar mucho la proximidad
-        
-        if score > best_score:
-            best_score = score
-            best_seat = seat_idx
-    
-    return best_seat
+# =============================================================================
+# === SECCIÓN 3: FUNCIÓN PRINCIPAL DEL ALGORITMO GENÉTICO (run_ga) =============
+# =============================================================================
+# Esta es la función que configura y ejecuta todo el proceso evolutivo.
 
-def mutate_smart(individual, students, seats, compatibility_matrix, indpb=0.2):
-    """
-    Mutación inteligente que considera el impacto en el fitness
-    """
-    if random.random() < indpb:
-        n = len(individual)
-        
-        # Calcular fitness antes de la mutación
-        fitness_antes = calcular_fitness_rapido(individual, students, seats, compatibility_matrix)
-        
-        # Seleccionar estudiantes para intercambiar
-        i, j = random.sample(range(n), 2)
-        
-        # Realizar intercambio
-        individual[i], individual[j] = individual[j], individual[i]
-        
-        # Calcular fitness después
-        fitness_despues = calcular_fitness_rapido(individual, students, seats, compatibility_matrix)
-        
-        # Si el intercambio empeora significativamente, revertir
-        if fitness_despues < fitness_antes - 0.1:  # Tolerancia pequeña
-            individual[i], individual[j] = individual[j], individual[i]
-    
-    return individual,
-
-def calcular_fitness_rapido(individual, students, seats, compatibility_matrix):
-    """
-    Cálculo rápido de fitness para mutación
-    """
-    # Penalización por compatibilidades cercanas
-    penalty = 0
-    n = len(individual)
-    
-    for i in range(n):
-        for j in range(i+1, n):
-            if compatibility_matrix[i][j] == 1:
-                seat_i = seats[individual[i]]
-                seat_j = seats[individual[j]]
-                dist = math.sqrt((seat_i[0] - seat_j[0])**2 + (seat_i[1] - seat_j[1])**2)
-                if dist <= 2.0:
-                    penalty += (3.0 - dist)
-    
-    return -penalty  # Negativo porque queremos minimizar conflictos
-
-def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows, 
+def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
            ngen=150, pop_size=200, w1=0.4, w2=0.6):
     """
-    Algoritmo genético mejorado que devuelve las 3 mejores soluciones
+    Configura y ejecuta el Algoritmo Genético.
     """
     num_students = len(students)
-    d_max = max(seat_distances.values())
+    d_max = max(seat_distances.values()) if seat_distances else 1
 
-    # Limpiar creadores previos si existen
-    if hasattr(creator, "FitnessMax"):
-        del creator.FitnessMax
-    if hasattr(creator, "Individual"):
-        del creator.Individual
-
+    # --- CONFIGURACIÓN DE DEAP ---
+    # Se crea la estructura básica: una función de fitness que se maximiza
+    # y un individuo que es una lista de Python.
     creator.create("FitnessMax", base.Fitness, weights=(1.0,))
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
+    # La 'toolbox' es donde se registran los operadores genéticos.
     toolbox = base.Toolbox()
-    
-    # Registrar operadores
-    toolbox.register("individual", lambda: create_smart_individual(
-        students, seats, compatibility_matrix, seat_distances))
+
+    # --- REGISTRO DE OPERADORES GENÉTICOS ---
+
+    # Creación de individuos y población
+    toolbox.register("individual", tools.initRepeat, creator.Individual, 
+                     lambda: random.choice(range(len(seats))), num_students)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("evaluate", lambda ind: evaluate(
-        ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2))
+
+    # Función de evaluación (fitness)
+    toolbox.register("evaluate", evaluate, students=students, seats=seats,
+                     compatibility_matrix=compatibility_matrix, seat_distances=seat_distances,
+                     d_max=d_max, w1=w1, w2=w2)
+
+    # OPERADOR DE CRUCE (EMPATEJAMIENTO): tools.cxPartialyMatched (PMX)
+    # Combina dos padres para crear dos hijos. Es bueno para problemas de permutación
+    # como este, donde cada asiento solo puede usarse una vez.
     toolbox.register("mate", tools.cxPartialyMatched)
-    toolbox.register("mutate", lambda ind: mutate_smart(
-        ind, students, seats, compatibility_matrix, indpb=0.15))
-    toolbox.register("select", tools.selTournament, tournsize=7)
 
-    # Crear población inicial
+    # OPERADOR DE MUTACIÓN: tools.mutShuffleIndexes
+    # Cambia aleatoriamente la posición (asiento) de algunos estudiantes.
+    # 'indpb' es la probabilidad de que cada gen (asiento) sea mutado.
+    toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.05)
+
+    # OPERADOR DE SELECCIÓN (PODA): tools.selTournament
+    # Elige a los 'padres' de la siguiente generación. Se realizan 'tournsize' torneos:
+    # en cada uno se elige un grupo aleatorio de individuos y el mejor de ese grupo gana.
+    # Esto da a los mejores individuos una mayor probabilidad de ser seleccionados.
+    toolbox.register("select", tools.selTournament, tournsize=3)
+
+    # --- EJECUCIÓN DEL ALGORITMO ---
+    
+    # Crear población inicial y repararla para que sea válida.
     pop = toolbox.population(n=pop_size)
+    for ind in pop:
+        repair(ind, len(seats))
 
-    # Estadísticas
+    # Hall of Fame: objeto que almacena a los mejores individuos encontrados.
+    hof = tools.HallOfFame(3)
+
+    # Estadísticas para seguir el progreso del algoritmo.
     stats = tools.Statistics(lambda ind: ind.fitness.values)
     stats.register("avg", np.mean)
     stats.register("max", np.max)
     stats.register("min", np.min)
     
     print("=== INICIANDO ALGORITMO GENÉTICO ===")
-    print(f"Población: {pop_size}, Generaciones: {ngen}")
-    print(f"Estudiantes: {num_students}, Asientos: {len(seats)}")
     
-    # Evaluar población inicial
-    fitnesses = list(map(toolbox.evaluate, pop))
-    for ind, fit in zip(pop, fitnesses):
-        ind.fitness.values = fit
-
-    # Evolución
-    for gen in range(ngen):
-        # Selección y variación
-        offspring = toolbox.select(pop, len(pop))
-        offspring = list(map(toolbox.clone, offspring))
-        
-        # Cruzamiento
-        for child1, child2 in zip(offspring[::2], offspring[1::2]):
-            if random.random() < 0.8:  # Probabilidad de cruzamiento
-                toolbox.mate(child1, child2)
-                del child1.fitness.values
-                del child2.fitness.values
-
-        # Mutación
-        for mutant in offspring:
-            if random.random() < 0.25:  # Probabilidad de mutación
-                toolbox.mutate(mutant)
-                del mutant.fitness.values
-
-        # Reparar individuos inválidos
-        for ind in offspring:
-            if not feasible(ind):
-                repair(ind, len(seats))
-
-        # Evaluar descendencia nueva
-        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-        fitnesses = map(toolbox.evaluate, invalid_ind)
-        for ind, fit in zip(invalid_ind, fitnesses):
-            ind.fitness.values = fit
-        
-        # Reemplazar población
-        pop[:] = offspring
-        
-        # Estadísticas cada 20 generaciones
-        if gen % 20 == 0 or gen == ngen - 1:
-            fits = [ind.fitness.values[0] for ind in pop]
-            length = len(pop)
-            mean = sum(fits) / length
-            sum2 = sum(x*x for x in fits)
-            std = abs(sum2 / length - mean**2)**0.5
-            print(f"Gen {gen:3d}: Max={max(fits):6.3f}, Avg={mean:6.3f}, Std={std:6.3f}")
-
-    # Obtener las 3 mejores soluciones únicas
-    pop.sort(key=lambda x: x.fitness.values[0], reverse=True)
+    # El algoritmo principal de DEAP que ejecuta el ciclo evolutivo.
+    algorithms.eaSimple(
+        population=pop,
+        toolbox=toolbox,
+        cxpb=0.8,  # Probabilidad de cruce
+        mutpb=0.2, # Probabilidad de mutación
+        ngen=ngen, # Número de generaciones
+        stats=stats,
+        halloffame=hof,
+        verbose=True
+    )
     
-    # Asegurar que las soluciones sean diferentes
+    print("=== ALGORITMO COMPLETADO ===")
+    
+    # Devuelve los 3 mejores individuos únicos encontrados.
     top_solutions = []
-    for ind in pop:
-        is_different = True
-        for existing in top_solutions:
-            if ind == existing:
-                is_different = False
-                break
-        if is_different:
-            top_solutions.append(list(ind))  # Crear copia
-        if len(top_solutions) >= 3:
-            break
-    
-    print(f"\n=== ALGORITMO COMPLETADO ===")
-    print(f"Mejores fitness: {[pop[i].fitness.values[0] for i in range(min(3, len(pop)))]}")
-    
+    for ind in hof:
+        if list(ind) not in top_solutions:
+            top_solutions.append(list(ind))
+            
     return top_solutions
-
-def print_detailed_analysis(solutions, students, seats, compatibility_matrix):
-    """
-    Análisis detallado de las soluciones encontradas
-    """
-    for idx, solution in enumerate(solutions):
-        print(f"\n{'='*50}")
-        print(f"SOLUCIÓN {idx + 1}")
-        print(f"{'='*50}")
-        
-        print("\n--- ASIGNACIÓN DE ASIENTOS ---")
-        for i, seat_idx in enumerate(solution):
-            seat = seats[seat_idx]
-            print(f"{students[i].name:15} -> Fila {seat[0]:2}, Columna {seat[1]:2} (Visión: {students[i].vision})")
-        
-        print("\n--- ANÁLISIS DE COMPATIBILIDADES ---")
-        conflicts = 0
-        total_pairs = 0
-        
-        for i in range(len(solution)):
-            for j in range(i+1, len(solution)):
-                if compatibility_matrix[i][j] == 1:  # Son compatibles (se distraen)
-                    total_pairs += 1
-                    seat_i = seats[solution[i]]
-                    seat_j = seats[solution[j]]
-                    dist = math.sqrt((seat_i[0] - seat_j[0])**2 + (seat_i[1] - seat_j[1])**2)
-                    
-                    if dist <= 2.0:
-                        conflicts += 1
-                        status = "❌ CONFLICTO"
-                    elif dist <= 3.0:
-                        status = "⚠️  CERCA"
-                    else:
-                        status = "✅ SEPARADOS"
-                    
-                    print(f"{students[i].name} - {students[j].name}: distancia {dist:.2f} {status}")
-        
-        print(f"\nRESUMEN: {conflicts}/{total_pairs} pares compatibles en conflicto")
-        
-        # Análisis de visión
-        print("\n--- ANÁLISIS DE UBICACIÓN POR VISIÓN ---")
-        for vision_type in ["no_far", "no_near", "normal"]:
-            students_type = [i for i, s in enumerate(students) if s.vision == vision_type]
-            if students_type:
-                rows = [seats[solution[i]][0] for i in students_type]
-                avg_row = sum(rows) / len(rows)
-                print(f"Visión {vision_type}: Fila promedio {avg_row:.1f}")
