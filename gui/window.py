@@ -423,6 +423,22 @@ class SeatPlanApp:
         for i in range(n):
             for j in range(i + 1, n):
                 cb = QCheckBox(f"{self.students[i].name} ↔️ {self.students[j].name}")
+                cb.setStyleSheet("""
+                    QCheckBox {
+                        padding: 6px;
+                    }
+                    QCheckBox::indicator {
+                        width: 18px;
+                        height: 18px;
+                        border: 2px solid #2E86AB;
+                        background-color: #ffffff;
+                        border-radius: 4px;
+                    }
+                    QCheckBox::indicator:checked {
+                        background-color: #4CAF50; /* verde tipo Material Design */
+                        border: 2px solid #388E3C;
+                    }
+                """)   
                 if self.compat_matrix[i, j] == 1:
                     cb.setChecked(True)
                 scroll_layout.addWidget(cb)
