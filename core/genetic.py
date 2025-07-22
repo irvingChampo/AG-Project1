@@ -141,20 +141,12 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
     toolbox = base.Toolbox()
 
     # --- REGISTRO DE OPERADORES GENÉTICOS ---
-
-    # Atributo: Un gen es un índice de asiento aleatorio.
     toolbox.register("attr_seat", random.randint, 0, seats_count - 1)
-    
-    # Individuo: Se crea llamando a 'attr_seat' N veces (N=num_students).
     toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_seat, num_students)
-    
-    # Población: Una lista de individuos.
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
-    # Operadores correctos para problemas de asignación
-    toolbox.register("mate", tools.cxUniform, indpb=0.5) # Cruce uniforme
-    toolbox.register("mutate", tools.mutUniformInt, low=0, up=seats_count - 1, indpb=0.05) # Mutación de entero
-    toolbox.register("select", tools.selTournament, tournsize=3) # Selección por torneo
+    toolbox.register("mate", tools.cxUniform, indpb=0.5)
+    toolbox.register("mutate", tools.mutUniformInt, low=0, up=seats_count - 1, indpb=0.05)
+    toolbox.register("select", tools.selTournament, tournsize=3)
     toolbox.register("evaluate", evaluate, students=students, seats=seats,
                      compatibility_matrix=compatibility_matrix, seat_distances=seat_distances,
                      d_max=d_max, w1=w1, w2=w2)
@@ -168,9 +160,10 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
     stats.register("max", np.max)
     stats.register("min", np.min)
     
-    print("=== INICIANDO ALGORITMO GENÉTICO ===")
+    # Se crea un 'logbook' para guardar el historial de estadísticas
+    logbook = []
     
-    # Bucle evolutivo explícito para asegurar la reparación
+    print("=== INICIANDO ALGORITMO GENÉTICO ===")
     
     # 1. Reparar y evaluar la población inicial
     for ind in pop:
@@ -182,23 +175,19 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
 
     # 2. Iniciar el ciclo de generaciones
     for gen in range(1, ngen + 1):
-        # Seleccionar la siguiente generación
         offspring = toolbox.select(pop, len(pop))
         offspring = [toolbox.clone(ind) for ind in offspring]
 
-        # Aplicar cruce sobre pares de hijos
         for i in range(1, len(offspring), 2):
             if random.random() < cxpb:
                 toolbox.mate(offspring[i-1], offspring[i])
                 del offspring[i-1].fitness.values, offspring[i].fitness.values
         
-        # Aplicar mutación sobre cada hijo
         for i in range(len(offspring)):
             if random.random() < mutpb:
                 toolbox.mutate(offspring[i])
                 del offspring[i].fitness.values
 
-        # Los individuos modificados (sin fitness válido) deben ser reparados y re-evaluados
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
         for ind in invalid_ind:
             repair(ind, seats_count) # Reparación ANTES de evaluar
@@ -207,21 +196,23 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
         for ind, fit in zip(invalid_ind, fitnesses):
             ind.fitness.values = fit
             
-        # Reemplazar la población antigua por los hijos
         pop[:] = offspring
         
-        # Actualizar Hall of Fame y estadísticas
         hof.update(pop)
         record = stats.compile(pop)
+        
+        # Se añade la generación actual al registro y se guarda en el logbook
+        record['gen'] = gen
+        logbook.append(record)
+        
         print(f"gen {gen:<4} nevals {len(invalid_ind):<4} avg {record['avg']:.6f} max {record['max']:.6f} min {record['min']:.6f}")
 
     print("=== ALGORITMO COMPLETADO ===")
     
-    # Devolver las mejores soluciones encontradas
     top_solutions = []
     for ind in hof:
-        # Asegurarse de que no se añadan soluciones duplicadas
         if list(ind) not in top_solutions:
             top_solutions.append(list(ind))
             
-    return top_solutions
+    # Se devuelve tanto las soluciones como el logbook con el historial
+    return top_solutions, logbook

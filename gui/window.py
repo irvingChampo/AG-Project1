@@ -15,6 +15,8 @@ from PySide6.QtCore import Qt
 from core.models import Student
 from core.genetic import run_ga
 from gui.plot import plot_layout
+# Se importa la nueva función para graficar la evolución
+from gui.evolution_plot import plot_evolution
 import numpy as np
 import sys
 import io
@@ -63,7 +65,6 @@ class SolutionDialog(QDialog):
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
 
-        # Asignación de asientos
         assignment_frame = QGroupBox("🪑 Asignación de Asientos")
         assignment_layout = QVBoxLayout(assignment_frame)
         
@@ -127,13 +128,11 @@ class SeatPlanApp:
     def setup_ui(self):
         self.main_layout = QVBoxLayout(self.window)
         
-        # --- Título Principal ---
         title = QLabel("🧬 SeatPlan - Optimizador de Asientos")
         title.setAlignment(Qt.AlignCenter)
         title.setObjectName("mainTitle")
         self.main_layout.addWidget(title)
         
-        # --- Área de Scroll para contenido ---
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
@@ -143,7 +142,6 @@ class SeatPlanApp:
         scroll_area.setWidget(content_widget)
         content_layout = QVBoxLayout(content_widget)
 
-        # --- Grupo 1: Configuración del Aula ---
         aula_box, aula_layout = self._create_group_box("🏫 Configuración del Aula")
         grid_layout = QGridLayout()
         grid_layout.addWidget(QLabel("Filas:"), 0, 0)
@@ -159,7 +157,6 @@ class SeatPlanApp:
         aula_layout.addLayout(grid_layout)
         content_layout.addWidget(aula_box)
 
-        # --- Grupo 2: Gestión de Estudiantes ---
         students_box, students_layout = self._create_group_box("👥 Gestión de Estudiantes")
         form_layout = QGridLayout()
         form_layout.addWidget(QLabel("Nombre:"), 0, 0)
@@ -191,7 +188,6 @@ class SeatPlanApp:
         students_layout.addLayout(buttons_layout)
         content_layout.addWidget(students_box)
 
-        # --- Grupo 3: Compatibilidades ---
         compat_box, compat_layout = self._create_group_box("🤝 Configuración de Compatibilidades")
         compat_info = QLabel("Marca a los estudiantes que se distraen entre sí.")
         compat_layout.addWidget(compat_info)
@@ -203,7 +199,6 @@ class SeatPlanApp:
         compat_layout.addWidget(self.compat_status)
         content_layout.addWidget(compat_box)
 
-        # --- Grupo 4: Optimización ---
         optim_box, optim_layout = self._create_group_box("🚀 Optimización")
         self.run_button = QPushButton("🧬 Ejecutar Algoritmo Genético")
         self.run_button.setObjectName("runButton")
@@ -214,7 +209,7 @@ class SeatPlanApp:
         optim_layout.addWidget(self.progress_label)
         content_layout.addWidget(optim_box)
 
-        content_layout.addStretch() # Empuja todo hacia arriba
+        content_layout.addStretch()
         self.name_input.returnPressed.connect(self.add_student)
 
     def setup_styles(self):
@@ -402,8 +397,12 @@ class SeatPlanApp:
         old_stdout = sys.stdout
         sys.stdout = captured_output = io.StringIO()
         
+        solutions = None
+        logbook = None
+
         try:
-            solutions = run_ga(self.students, seats, self.compat_matrix, seat_distances, [1])
+            # Ahora run_ga devuelve dos valores: las soluciones y el historial (logbook)
+            solutions, logbook = run_ga(self.students, seats, self.compat_matrix, seat_distances, [1])
         finally:
             sys.stdout = old_stdout
             print(captured_output.getvalue())
@@ -412,5 +411,8 @@ class SeatPlanApp:
 
         if solutions:
             SolutionDialog(solutions, self.students, seats, self.compat_matrix, self.window).exec()
+            # Después de mostrar las soluciones, se muestra el gráfico de evolución
+            if logbook:
+                plot_evolution(logbook)
         else:
             QMessageBox.warning(self.window, "Sin Resultados", "El algoritmo no pudo encontrar una solución válida. Intenta de nuevo o ajusta los parámetros.")
