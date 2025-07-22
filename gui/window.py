@@ -15,11 +15,12 @@ from PySide6.QtCore import Qt
 from core.models import Student
 from core.genetic import run_ga
 from gui.plot import plot_layout
-# Se importa la nueva función para graficar la evolución
 from gui.evolution_plot import plot_evolution
 import numpy as np
 import sys
 import io
+import os
+import csv
 
 class SolutionDialog(QDialog):
     """Diálogo para mostrar las 3 mejores soluciones encontradas."""
@@ -120,7 +121,6 @@ class SeatPlanApp:
         self.setup_ui()
 
     def _create_group_box(self, title):
-        """Helper para crear un QGroupBox con un layout vertical."""
         box = QGroupBox(title)
         layout = QVBoxLayout(box)
         return box, layout
@@ -171,9 +171,16 @@ class SeatPlanApp:
         self.vision_input.setItemData(2, "no_near")
         form_layout.addWidget(self.vision_input, 1, 1)
         students_layout.addLayout(form_layout)
+        
+        add_buttons_layout = QHBoxLayout()
         self.add_button = QPushButton("➕ Agregar Estudiante")
         self.add_button.clicked.connect(self.add_student)
-        students_layout.addWidget(self.add_button)
+        add_buttons_layout.addWidget(self.add_button)
+        self.load_dataset_button = QPushButton("📂 Cargar Dataset")
+        self.load_dataset_button.clicked.connect(self.load_dataset)
+        add_buttons_layout.addWidget(self.load_dataset_button)
+        students_layout.addLayout(add_buttons_layout)
+        
         self.students_list = QListWidget()
         self.students_list.setMaximumHeight(150)
         students_layout.addWidget(QLabel("Lista de Estudiantes:"))
@@ -183,7 +190,12 @@ class SeatPlanApp:
         self.remove_button.clicked.connect(self.remove_student)
         buttons_layout.addWidget(self.remove_button)
         self.clear_button = QPushButton("🗑️ Limpiar Todo")
-        self.clear_button.clicked.connect(self.clear_students)
+        
+        # === INICIO DE LA MODIFICACIÓN 1 ===
+        # Se usa una lambda para llamar a clear_students con un argumento.
+        self.clear_button.clicked.connect(lambda: self.clear_students(ask_confirmation=True))
+        # === FIN DE LA MODIFICACIÓN 1 ===
+        
         buttons_layout.addWidget(self.clear_button)
         students_layout.addLayout(buttons_layout)
         content_layout.addWidget(students_box)
@@ -316,16 +328,79 @@ class SeatPlanApp:
             self.compat_status.setText("❌ Compatibilidades no definidas")
             self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
 
-    def clear_students(self):
-        reply = QMessageBox.question(self.window, "Confirmar Limpieza",
-                                     "¿Estás seguro de que quieres eliminar a todos los estudiantes de la lista?",
+    # === INICIO DE LA MODIFICACIÓN 2 ===
+    # Se cambia la firma de la función y se usa el nuevo parámetro.
+    def clear_students(self, ask_confirmation=False):
+        if ask_confirmation:
+            reply = QMessageBox.question(self.window, "Confirmar Limpieza",
+                                         "¿Estás seguro de que quieres eliminar a todos los estudiantes de la lista?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
+
+        self.students.clear()
+        self.students_list.clear()
+        self.compat_matrix = None
+        self.compat_status.setText("❌ Compatibilidades no definidas")
+        self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
+    # === FIN DE LA MODIFICACIÓN 2 ===
+    
+    def load_dataset(self):
+        reply = QMessageBox.question(self.window, "Confirmar Carga",
+                                     "¿Deseas cargar el dataset predefinido?\nSe borrarán todos los estudiantes actuales.",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.students.clear()
-            self.students_list.clear()
-            self.compat_matrix = None
-            self.compat_status.setText("❌ Compatibilidades no definidas")
-            self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        if reply == QMessageBox.No:
+            return
+
+        # Limpia los datos existentes sin pedir confirmación.
+        self.clear_students(ask_confirmation=False)
+
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            students_file = os.path.join(base_dir, 'datasets', 'students_dataset.csv')
+            compat_file = os.path.join(base_dir, 'datasets', 'compatibility_dataset.csv')
+            
+            vision_text_map = {"normal": "👀 Normal", "no_far": "👓 No ve bien de lejos", "no_near": "🔍 No ve bien de cerca"}
+            
+            name_to_index = {}
+            with open(students_file, mode='r', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                for row in reader:
+                    name = row['name'].strip()
+                    vision = row['vision'].strip()
+                    student_index = len(self.students)
+                    self.students.append(Student(name, vision, student_index))
+                    name_to_index[name] = student_index
+                    
+                    display_text = f"{vision_text_map.get(vision, vision)} - {name}"
+                    self.students_list.addItem(display_text)
+
+            num_students = len(self.students)
+            self.compat_matrix = np.zeros((num_students, num_students))
+            compat_pairs_count = 0
+            with open(compat_file, mode='r', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                for row in reader:
+                    s1_name = row['student1_name'].strip()
+                    s2_name = row['student2_name'].strip()
+                    if s1_name in name_to_index and s2_name in name_to_index:
+                        idx1 = name_to_index[s1_name]
+                        idx2 = name_to_index[s2_name]
+                        self.compat_matrix[idx1, idx2] = 1
+                        self.compat_matrix[idx2, idx1] = 1
+                        compat_pairs_count += 1
+            
+            self.rows_input.setValue(4)
+            self.cols_input.setValue(5)
+            self.compat_status.setText(f"✅ {compat_pairs_count} parejas conflictivas cargadas")
+            self.compat_status.setStyleSheet("color: #2E7D32; font-weight: bold;")
+            QMessageBox.information(self.window, "Éxito", f"Se cargaron {num_students} estudiantes y {compat_pairs_count} compatibilidades.")
+
+        except FileNotFoundError as e:
+            QMessageBox.critical(self.window, "Error de Archivo",
+                                 f"No se pudo encontrar un archivo del dataset.\nAsegúrate de que la carpeta 'datasets' y sus archivos .csv existen.\n\nError: {e}")
+        except Exception as e:
+            QMessageBox.critical(self.window, "Error Inesperado", f"Ocurrió un error al cargar el dataset:\n{e}")
 
     def define_compatibilities(self):
         n = len(self.students)
@@ -401,7 +476,6 @@ class SeatPlanApp:
         logbook = None
 
         try:
-            # Ahora run_ga devuelve dos valores: las soluciones y el historial (logbook)
             solutions, logbook = run_ga(self.students, seats, self.compat_matrix, seat_distances, [1])
         finally:
             sys.stdout = old_stdout
@@ -411,7 +485,6 @@ class SeatPlanApp:
 
         if solutions:
             SolutionDialog(solutions, self.students, seats, self.compat_matrix, self.window).exec()
-            # Después de mostrar las soluciones, se muestra el gráfico de evolución
             if logbook:
                 plot_evolution(logbook)
         else:
