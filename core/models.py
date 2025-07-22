@@ -1,6 +1,3 @@
-# ================================================
-# FILE: core/models.py
-# ================================================
 # Este archivo define las estructuras de datos básicas del proyecto.
 
 from dataclasses import dataclass

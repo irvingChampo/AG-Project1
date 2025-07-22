@@ -1,10 +1,3 @@
-# ================================================
-# FILE: gui/window.py
-# ================================================
-# Este archivo define toda la interfaz gráfica de usuario (GUI) utilizando PySide6.
-# Contiene la ventana principal, los diálogos, los botones y la lógica para
-# interactuar con el algoritmo genético.
-
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSpinBox, QLineEdit, QListWidget, QComboBox, QMessageBox,
@@ -23,7 +16,6 @@ import os
 import csv
 
 class SolutionDialog(QDialog):
-    """Diálogo para mostrar las 3 mejores soluciones encontradas."""
     
     def __init__(self, solutions, students, seats, compatibility_matrix, parent=None):
         super().__init__(parent)
@@ -191,10 +183,8 @@ class SeatPlanApp:
         buttons_layout.addWidget(self.remove_button)
         self.clear_button = QPushButton("🗑️ Limpiar Todo")
         
-        # === INICIO DE LA MODIFICACIÓN 1 ===
-        # Se usa una lambda para llamar a clear_students con un argumento.
+
         self.clear_button.clicked.connect(lambda: self.clear_students(ask_confirmation=True))
-        # === FIN DE LA MODIFICACIÓN 1 ===
         
         buttons_layout.addWidget(self.clear_button)
         students_layout.addLayout(buttons_layout)
@@ -328,8 +318,7 @@ class SeatPlanApp:
             self.compat_status.setText("❌ Compatibilidades no definidas")
             self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
 
-    # === INICIO DE LA MODIFICACIÓN 2 ===
-    # Se cambia la firma de la función y se usa el nuevo parámetro.
+
     def clear_students(self, ask_confirmation=False):
         if ask_confirmation:
             reply = QMessageBox.question(self.window, "Confirmar Limpieza",
@@ -343,7 +332,6 @@ class SeatPlanApp:
         self.compat_matrix = None
         self.compat_status.setText("❌ Compatibilidades no definidas")
         self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
-    # === FIN DE LA MODIFICACIÓN 2 ===
     
     def load_dataset(self):
         reply = QMessageBox.question(self.window, "Confirmar Carga",
@@ -352,7 +340,6 @@ class SeatPlanApp:
         if reply == QMessageBox.No:
             return
 
-        # Limpia los datos existentes sin pedir confirmación.
         self.clear_students(ask_confirmation=False)
 
         try:

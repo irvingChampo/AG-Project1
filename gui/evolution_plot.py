@@ -1,13 +1,7 @@
 import matplotlib.pyplot as plt
 
 def plot_evolution(logbook):
-    """
-    Genera un gráfico que muestra la evolución del fitness máximo, promedio y mínimo.
-    
-    Args:
-        logbook (list): Una lista de diccionarios, donde cada diccionario contiene
-                        las estadísticas ('max', 'avg', 'min') para una generación.
-    """
+
     if not logbook:
         print("El logbook está vacío, no se puede generar el gráfico de evolución.")
         return
