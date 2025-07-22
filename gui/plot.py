@@ -157,15 +157,11 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
     # --- Información adicional ---
     info_text = f"Total estudiantes: {len(students)}\n"
     info_text += f"Asientos totales: {len(seats)}\n"
-    # === LÍNEA CORREGIDA ===
-    # La línea original estaba incompleta. Se ha corregido para que reste
-    # correctamente el número de estudiantes al total de asientos.
     info_text += f"Asientos libres: {len(seats) - len(students)}"
 
-    # Nota: La variable 'info_text' se construye pero no se muestra en el gráfico.
-    # Si se quisiera mostrar, se podría añadir una línea como la siguiente:
-    # ax.text(1.02, 0.4, info_text, transform=ax.transAxes, fontsize=10,
-    #         verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='aliceblue'))
+    # Se añade el cuadro de texto con la información al gráfico.
+    ax.text(1.02, 0.4, info_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='aliceblue'))
     
     plt.tight_layout(rect=[0, 0, 0.85, 1]) # Ajustar layout para que quepa la leyenda
     plt.show()
