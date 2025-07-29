@@ -6,12 +6,10 @@ import copy
 # ESTRUCTURA DEL INDIVIDUO
 class Individual:
     def __init__(self, chromosome):
-        #lista de índices de asientos.
         self.chromosome = chromosome
-        #puntuación de qué tan buena es esta solución.
         self.fitness = 0.0
 
-#FUNCIONES DE EVALUACIÓN (CÁLCULO DE LA APTITUD)
+# FUNCIONES DE EVALUACIÓN (CÁLCULO DE LA APTITUD)
 
 def score_vista(individual_chromosome, students, seats, seat_distances, d_max):
     v_total = 0
@@ -19,7 +17,6 @@ def score_vista(individual_chromosome, students, seats, seat_distances, d_max):
         student = students[i]
         seat = seats[seat_idx]
         d = seat_distances[seat]
-
         if student.vision == "no_far":
             v_i = max(0, 1.0 - (d / d_max)) * 2.0
         elif student.vision == "no_near":
@@ -47,16 +44,46 @@ def penalizacion_compatibilidad(individual_chromosome, students, seats, compatib
                 penalty_count += 1
     return total_penalty / max(penalty_count, 1)
 
-def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, w1=0.4, w2=0.6):
+# === INICIO DE LA MODIFICACIÓN: Nueva función de penalización ===
+def penalizacion_asientos_vacios(individual_chromosome, all_seats, seat_distances, d_max):
+    """Calcula una penalización por dejar asientos vacíos en las primeras filas."""
+    occupied_seats_indices = set(individual_chromosome)
+    total_penalty = 0
+    empty_seat_count = 0
+
+    # Iterar por todos los asientos del aula
+    for i, seat in enumerate(all_seats):
+        if i not in occupied_seats_indices:
+            # Si el asiento está vacío, calcular una penalización
+            dist = seat_distances[seat]
+            # La penalización es inversamente proporcional a la distancia:
+            # un asiento vacío en una fila delantera (dist pequeña) duele más.
+            penalty = (d_max - dist)
+            total_penalty += penalty
+            empty_seat_count += 1
+            
+    # Normalizar por el número de asientos vacíos para que no dependa de cuántos alumnos hay
+    return total_penalty / max(empty_seat_count, 1)
+# === FIN DE LA MODIFICACIÓN ===
+
+# === INICIO DE LA MODIFICACIÓN: Actualización de la función de fitness ===
+def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, w1=0.3, w2=0.3, w3=0.4):
     v_score = score_vista(individual.chromosome, students, seats, seat_distances, d_max)
     c_penalty = penalizacion_compatibilidad(individual.chromosome, students, seats, compatibility_matrix)
-    v_normalized = v_score / 2.0
-    p_normalized = c_penalty / 50.0
-    fitness = (w1 * v_normalized) - (w2 * p_normalized)
+    # Se llama a la nueva función de penalización
+    e_penalty = penalizacion_asientos_vacios(individual.chromosome, seats, seat_distances, d_max)
+
+    # Normalización de cada componente
+    v_normalized = v_score / 2.0  # Max score teórico es 2.0
+    p_normalized = c_penalty / 50.0 # Max penalty por pareja es 50.0
+    e_normalized = e_penalty / d_max # Max penalty por asiento vacío es d_max
+
+    # Nueva fórmula de fitness con tres objetivos ponderados
+    fitness = (w1 * v_normalized) - (w2 * p_normalized) - (w3 * e_normalized)
     return fitness
+# === FIN DE LA MODIFICACIÓN ===
 
 # REPARACIÓN
-
 def feasible(individual_chromosome):
     return len(set(individual_chromosome)) == len(individual_chromosome)
 
@@ -78,7 +105,6 @@ def repair(individual_chromosome, seats_count):
     return individual_chromosome
 
 # OPERADORES GENÉTICOS 
-
 def selection_tournament(population, k, tournsize):
     selected = []
     for _ in range(k):
@@ -105,57 +131,52 @@ def mutate_integer(individual, low, up, indpb):
             individual.chromosome[i] = random.randint(low, up)
 
 # FUNCIÓN PRINCIPAL DEL ALGORITMO GENÉTICO (run_ga) 
-
+# === INICIO DE LA MODIFICACIÓN: Se ajustan los pesos por defecto en la firma ===
 def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
-           ngen=150, pop_size=200, w1=0.4, w2=0.6, cxpb=0.8, mutpb=0.2):
+           ngen=150, pop_size=200, w1=0.3, w2=0.3, w3=0.4, cxpb=0.8, mutpb=0.2):
+# === FIN DE LA MODIFICACIÓN ===
     
     num_students = len(students)
     seats_count = len(seats)
     d_max = max(seat_distances.values()) if seat_distances else 1
 
-    # --- CREACIÓN DE LA POBLACIÓN INICIAL ---
     population = []
     for _ in range(pop_size):
         chromosome = [random.randint(0, seats_count - 1) for _ in range(num_students)]
         population.append(Individual(chromosome))
 
-    # --- REPARACIÓN Y EVALUACIÓN INICIAL ---
     print("=== INICIANDO ALGORITMO GENÉTICO (IMPLEMENTACIÓN MANUAL) ===")
     for ind in population:
         repair(ind.chromosome, seats_count)
-        ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2)
+        # === INICIO DE LA MODIFICACIÓN: Se actualiza la llamada a evaluate ===
+        ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2, w3)
+        # === FIN DE LA MODIFICACIÓN ===
 
-    # --- PREPARACIÓN PARA EL BUCLE EVOLUTIVO ---
     logbook = []
     hof = sorted(population, key=lambda ind: ind.fitness, reverse=True)[:3]
 
-    # --- BUCLE DE GENERACIONES ---
     for gen in range(1, ngen + 1):
-        # 1. SELECCIÓN (EMPAREJAMIENTO)
         parents = selection_tournament(population, k=len(population), tournsize=3)
         offspring = [copy.deepcopy(p) for p in parents]
 
-        # 2. CRUZA (CROSSOVER)
         for i in range(0, len(offspring) - 1, 2):
             if random.random() < cxpb:
                 child1, child2 = crossover_uniform(offspring[i], offspring[i+1], indpb=0.5)
                 offspring[i] = child1
                 offspring[i+1] = child2
 
-        # 3. MUTACIÓN
         for ind in offspring:
             if random.random() < mutpb:
                 mutate_integer(ind, low=0, up=seats_count - 1, indpb=0.05)
         
-        # 4. REPARACIÓN Y EVALUACIÓN DE LOS NUEVOS HIJOS
         for ind in offspring:
             repair(ind.chromosome, seats_count)
-            ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2)
+            # === INICIO DE LA MODIFICACIÓN: Se actualiza la llamada a evaluate ===
+            ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2, w3)
+            # === FIN DE LA MODIFICACIÓN ===
         
-        # 5. LA NUEVA POBLACIÓN REEMPLAZA A LA ANTIGUA
         population[:] = offspring
 
-        # 6. ACTUALIZACIÓN DE ESTADÍSTICAS Y HALL OF FAME
         hof.extend(population)
         hof = sorted(hof, key=lambda ind: ind.fitness, reverse=True)
         unique_hof_chromosomes = []

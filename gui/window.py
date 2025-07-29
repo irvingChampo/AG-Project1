@@ -134,20 +134,19 @@ class SeatPlanApp:
         scroll_area.setWidget(content_widget)
         content_layout = QVBoxLayout(content_widget)
 
+        # === INICIO DE LA MODIFICACIÓN: Cambio de SpinBox a ComboBox para el aula ===
         aula_box, aula_layout = self._create_group_box("🏫 Configuración del Aula")
-        grid_layout = QGridLayout()
-        grid_layout.addWidget(QLabel("Filas:"), 0, 0)
-        self.rows_input = QSpinBox()
-        self.rows_input.setMinimum(1); self.rows_input.setMaximum(20); self.rows_input.setValue(5)
-        grid_layout.addWidget(self.rows_input, 0, 1)
-        grid_layout.addWidget(QLabel("Columnas:"), 0, 2)
-        self.cols_input = QSpinBox()
-        self.cols_input.setMinimum(1); self.cols_input.setMaximum(20); self.cols_input.setValue(6)
-        grid_layout.addWidget(self.cols_input, 0, 3)
-        grid_layout.setColumnStretch(1, 1)
-        grid_layout.setColumnStretch(3, 1)
-        aula_layout.addLayout(grid_layout)
+        aula_config_layout = QHBoxLayout()
+        aula_config_layout.addWidget(QLabel("Selecciona el tamaño del aula:"))
+        self.aula_input = QComboBox()
+        self.aula_input.addItems([
+            "Opción 1: 5 Filas x 6 Columnas (30 asientos)",
+            "Opción 2: 8 Filas x 5 Columnas (40 asientos)"
+        ])
+        aula_config_layout.addWidget(self.aula_input)
+        aula_layout.addLayout(aula_config_layout)
         content_layout.addWidget(aula_box)
+        # === FIN DE LA MODIFICACIÓN ===
 
         students_box, students_layout = self._create_group_box("👥 Gestión de Estudiantes")
         form_layout = QGridLayout()
@@ -182,10 +181,7 @@ class SeatPlanApp:
         self.remove_button.clicked.connect(self.remove_student)
         buttons_layout.addWidget(self.remove_button)
         self.clear_button = QPushButton("🗑️ Limpiar Todo")
-        
-
         self.clear_button.clicked.connect(lambda: self.clear_students(ask_confirmation=True))
-        
         buttons_layout.addWidget(self.clear_button)
         students_layout.addLayout(buttons_layout)
         content_layout.addWidget(students_box)
@@ -299,8 +295,9 @@ class SeatPlanApp:
             QMessageBox.warning(self.window, "Estudiante Duplicado", "Ya existe un estudiante con ese nombre.")
             return
         
-        self.students.append(Student(name, vision_data, len(self.students)))
-        display_text = f"{vision_text} - {name}"
+        student_index = len(self.students)
+        self.students.append(Student(name, vision_data, student_index))
+        display_text = f"[ID: {student_index}] {vision_text} - {name}"
         self.students_list.addItem(display_text)
         self.name_input.clear()
         self.name_input.setFocus()
@@ -313,11 +310,13 @@ class SeatPlanApp:
         if current_row >= 0:
             self.students_list.takeItem(current_row)
             self.students.pop(current_row)
-            for i, student in enumerate(self.students): student.index = i
+            for i, student in enumerate(self.students):
+                student.index = i
+                item_text = self.students_list.item(i).text().split('] ', 1)[1]
+                self.students_list.item(i).setText(f"[ID: {i}] {item_text}")
             self.compat_matrix = None
             self.compat_status.setText("❌ Compatibilidades no definidas")
             self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
-
 
     def clear_students(self, ask_confirmation=False):
         if ask_confirmation:
@@ -326,7 +325,6 @@ class SeatPlanApp:
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
                 return
-
         self.students.clear()
         self.students_list.clear()
         self.compat_matrix = None
@@ -349,17 +347,19 @@ class SeatPlanApp:
             
             vision_text_map = {"normal": "👀 Normal", "no_far": "👓 No ve bien de lejos", "no_near": "🔍 No ve bien de cerca"}
             
-            name_to_index = {}
+            id_from_file_to_index = {}
             with open(students_file, mode='r', encoding='utf-8') as infile:
                 reader = csv.DictReader(infile)
                 for row in reader:
+                    file_id = row['id'].strip()
                     name = row['name'].strip()
                     vision = row['vision'].strip()
+                    
                     student_index = len(self.students)
                     self.students.append(Student(name, vision, student_index))
-                    name_to_index[name] = student_index
+                    id_from_file_to_index[file_id] = student_index
                     
-                    display_text = f"{vision_text_map.get(vision, vision)} - {name}"
+                    display_text = f"[ID: {student_index}] {vision_text_map.get(vision, vision)} - {name}"
                     self.students_list.addItem(display_text)
 
             num_students = len(self.students)
@@ -368,17 +368,20 @@ class SeatPlanApp:
             with open(compat_file, mode='r', encoding='utf-8') as infile:
                 reader = csv.DictReader(infile)
                 for row in reader:
-                    s1_name = row['student1_name'].strip()
-                    s2_name = row['student2_name'].strip()
-                    if s1_name in name_to_index and s2_name in name_to_index:
-                        idx1 = name_to_index[s1_name]
-                        idx2 = name_to_index[s2_name]
+                    s1_id = row['student1_id'].strip()
+                    s2_id = row['student2_id'].strip()
+                    
+                    if s1_id in id_from_file_to_index and s2_id in id_from_file_to_index:
+                        idx1 = id_from_file_to_index[s1_id]
+                        idx2 = id_from_file_to_index[s2_id]
                         self.compat_matrix[idx1, idx2] = 1
                         self.compat_matrix[idx2, idx1] = 1
                         compat_pairs_count += 1
             
-            self.rows_input.setValue(4)
-            self.cols_input.setValue(5)
+            # === INICIO DE LA MODIFICACIÓN: Seleccionar opción de aula por defecto ===
+            self.aula_input.setCurrentIndex(0) # Selecciona "Opción 1: 5x6"
+            # === FIN DE LA MODIFICACIÓN ===
+            
             self.compat_status.setText(f"✅ {compat_pairs_count} parejas conflictivas cargadas")
             self.compat_status.setStyleSheet("color: #2E7D32; font-weight: bold;")
             QMessageBox.information(self.window, "Éxito", f"Se cargaron {num_students} estudiantes y {compat_pairs_count} compatibilidades.")
@@ -396,7 +399,7 @@ class SeatPlanApp:
             return
 
         dialog = QDialog(self.window)
-        dialog.setWindowTitle("Definir Compatibilidades"); dialog.setMinimumSize(400, 300)
+        dialog.setWindowTitle("Definir Compatibilidades"); dialog.setMinimumSize(450, 300)
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel("Marca las <b>PAREJAS</b> que se <b>DISTRAEN</b> entre sí:"))
         
@@ -409,23 +412,9 @@ class SeatPlanApp:
 
         for i in range(n):
             for j in range(i + 1, n):
-                cb = QCheckBox(f"{self.students[i].name} ↔️ {self.students[j].name}")
-                cb.setStyleSheet("""
-                    QCheckBox {
-                        padding: 6px;
-                    }
-                    QCheckBox::indicator {
-                        width: 18px;
-                        height: 18px;
-                        border: 2px solid #2E86AB;
-                        background-color: #ffffff;
-                        border-radius: 4px;
-                    }
-                    QCheckBox::indicator:checked {
-                        background-color: #4CAF50; /* verde tipo Material Design */
-                        border: 2px solid #388E3C;
-                    }
-                """)   
+                student1_info = f"[ID:{self.students[i].index}] {self.students[i].name}"
+                student2_info = f"[ID:{self.students[j].index}] {self.students[j].name}"
+                cb = QCheckBox(f"{student1_info} ↔️ {student2_info}")
                 if self.compat_matrix[i, j] == 1:
                     cb.setChecked(True)
                 scroll_layout.addWidget(cb)
@@ -449,14 +438,37 @@ class SeatPlanApp:
             self.compat_status.setText(f"✅ {compatible_pairs} parejas conflictivas definidas")
             self.compat_status.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
+    # === INICIO DE LA MODIFICACIÓN: Lógica para configurar aula y distancias ===
     def optimize_seats(self):
         if not self.students:
             QMessageBox.warning(self.window, "Error", "No hay estudiantes agregados en la lista.")
             return
-        total_seats = self.rows_input.value() * self.cols_input.value()
+
+        # 1. Determinar dimensiones y distancias del aula
+        selected_index = self.aula_input.currentIndex()
+        if selected_index == 0: # Opción 1: 5x6
+            rows, cols = 5, 6
+            distancia_inicial = 2 # metros
+            distancia_entre_filas = 1 # metro
+        else: # Opción 2: 8x5
+            rows, cols = 8, 5
+            distancia_inicial = 1 # metro
+            distancia_entre_filas = 1 # metro
+
+        total_seats = rows * cols
         if total_seats < len(self.students):
-            QMessageBox.critical(self.window, "Error de Capacidad", "No hay suficientes asientos en el aula para todos los estudiantes.")
+            QMessageBox.critical(self.window, "Error de Capacidad", f"El aula seleccionada ({total_seats} asientos) no tiene suficientes lugares para los {len(self.students)} estudiantes.")
             return
+            
+        # 2. Crear la lista de asientos y el diccionario de distancias en metros
+        seats = [(r + 1, c + 1) for r in range(rows) for c in range(cols)]
+        seat_distances = {}
+        for r in range(rows):
+            distancia_fila = distancia_inicial + (r * distancia_entre_filas)
+            for c in range(cols):
+                seat_distances[(r + 1, c + 1)] = distancia_fila
+
+        # 3. Resto de la lógica (sin cambios)
         if self.compat_matrix is None:
             reply = QMessageBox.question(self.window, "Aviso de Compatibilidad", 
                                          "No has definido las compatibilidades. ¿Deseas continuar asumiendo que ningún estudiante se distrae con otro?",
@@ -464,9 +476,6 @@ class SeatPlanApp:
             if reply == QMessageBox.No:
                 return
             self.compat_matrix = np.zeros((len(self.students), len(self.students)))
-
-        seats = [(r + 1, c + 1) for r in range(self.rows_input.value()) for c in range(self.cols_input.value())]
-        seat_distances = {seat: seat[0] for seat in seats}
 
         self.progress_label.setText("🔄 Ejecutando algoritmo genético, por favor espera...")
         self.run_button.setEnabled(False)
@@ -492,3 +501,4 @@ class SeatPlanApp:
                 plot_evolution(logbook)
         else:
             QMessageBox.warning(self.window, "Sin Resultados", "El algoritmo no pudo encontrar una solución válida. Intenta de nuevo o ajusta los parámetros.")
+    # === FIN DE LA MODIFICACIÓN ===
