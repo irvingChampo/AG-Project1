@@ -11,49 +11,53 @@ class Individual:
 
 # FUNCIONES DE EVALUACIÓN (CÁLCULO DE LA APTITUD)
 def penalizacion_vision(individual_chromosome, students, seats, seat_distances):
-    """
-    Calcula el error total de posicionamiento basado en la distancia óptima de visión.
-    Fórmula para cada estudiante: |R - R*|
-    R  = Distancia real del asiento.
-    R* = Distancia óptima del estudiante.
-    """
     total_error = 0
     students_with_needs = 0
-
     for i, seat_idx in enumerate(individual_chromosome):
         student = students[i]
-        
-        # La "bandera" para ignorar a los de visión normal es R* = 0
         if student.distancia_optima > 0:
             distancia_optima_R_estrella = student.distancia_optima
             asiento_asignado = seats[seat_idx]
             distancia_real_R = seat_distances[asiento_asignado]
-            
             error = abs(distancia_real_R - distancia_optima_R_estrella)
             total_error += error
             students_with_needs += 1
-
-    # Se normaliza por el número de estudiantes con necesidades para no depender de cuántos hay
     return total_error / max(students_with_needs, 1)
-# === FIN DE LA MODIFICACIÓN ===
 
+# === INICIO DE LA MODIFICACIÓN: Nueva lógica de 8 Vecinos ===
 def penalizacion_compatibilidad(individual_chromosome, students, seats, compatibility_matrix):
+    """
+    Calcula una penalización si dos estudiantes INCOMPATIBLES son vecinos directos
+    (en cualquiera de las 8 direcciones).
+    """
     total_penalty = 0
-    penalty_count = 0
+    # Este contador sirve para normalizar la penalización total.
+    # Cuenta el número total de parejas incompatibles definidas en el dataset.
+    incompatible_pairs_count = 0 
     n = len(individual_chromosome)
     for i in range(n):
         for j in range(i + 1, n):
+            # 1. Verificar si los estudiantes i y j son INCOMPATIBLES
             if compatibility_matrix[i][j] == 1:
-                seat_i = seats[individual_chromosome[i]]
-                seat_j = seats[individual_chromosome[j]]
-                dist_euc = math.sqrt((seat_i[0] - seat_j[0]) ** 2 + (seat_i[1] - seat_j[1]) ** 2)
-                if dist_euc <= 1.0: penalty = 50.0
-                elif dist_euc <= 1.42: penalty = 25.0
-                elif dist_euc <= 2.0: penalty = 10.0
-                else: penalty = 0.0
-                total_penalty += penalty
-                penalty_count += 1
-    return total_penalty / max(penalty_count, 1)
+                incompatible_pairs_count += 1
+
+                # Obtener las coordenadas (fila, columna) de cada estudiante
+                seat_i_coords = seats[individual_chromosome[i]]
+                seat_j_coords = seats[individual_chromosome[j]]
+
+                # 2. Verificar si son vecinos bajo la regla de 8 vecinos (Vecindad de Moore)
+                row_diff = abs(seat_i_coords[0] - seat_j_coords[0])
+                col_diff = abs(seat_i_coords[1] - seat_j_coords[1])
+
+                # Si la diferencia en filas Y columnas es 1 o menos, son vecinos.
+                if row_diff <= 1 and col_diff <= 1:
+                    # 3. Aplicar una penalización alta y fija si son vecinos e incompatibles.
+                    total_penalty += 50.0
+    
+    # La penalización total se divide por el número total de parejas incompatibles.
+    # Esto da un "castigo promedio por cada relación conflictiva".
+    return total_penalty / max(incompatible_pairs_count, 1)
+# === FIN DE LA MODIFICACIÓN ===
 
 def penalizacion_asientos_vacios(individual_chromosome, all_seats, seat_distances, d_max):
     occupied_seats_indices = set(individual_chromosome)
@@ -67,25 +71,18 @@ def penalizacion_asientos_vacios(individual_chromosome, all_seats, seat_distance
             empty_seat_count += 1
     return total_penalty / max(empty_seat_count, 1)
 
-# === MODIFICACIÓN: Nueva función de fitness que minimiza tres penalizaciones ===
 def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, w1=0.4, w2=0.3, w3=0.3):
-    # Calcular las tres penalizaciones
     v_penalty = penalizacion_vision(individual.chromosome, students, seats, seat_distances)
     c_penalty = penalizacion_compatibilidad(individual.chromosome, students, seats, compatibility_matrix)
     e_penalty = penalizacion_asientos_vacios(individual.chromosome, seats, seat_distances, d_max)
 
-    # Normalización de cada componente
-    # El error de visión se normaliza por la distancia máxima (peor caso posible de error)
     vp_normalized = v_penalty / d_max
     cp_normalized = c_penalty / 50.0 
     ep_normalized = e_penalty / d_max 
 
-    # Fórmula de fitness: se suman las penalizaciones ponderadas y se niega el resultado.
-    # El AG maximiza el fitness, por lo que maximizar un número negativo es minimizar el error total.
     total_penalty = (w1 * vp_normalized) + (w2 * cp_normalized) + (w3 * ep_normalized)
     fitness = -total_penalty
     return fitness
-# === FIN DE LA MODIFICACIÓN ===
 
 # REPARACIÓN
 def feasible(individual_chromosome):

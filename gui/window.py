@@ -8,7 +8,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont
 from core.models import Student
-from core.genetic import run_ga, evaluate
+# === INICIO DE LA MODIFICACIÓN: Importar todas las funciones necesarias explícitamente ===
+from core.genetic import run_ga, evaluate, penalizacion_vision, penalizacion_compatibilidad, penalizacion_asientos_vacios
+# === FIN DE LA MODIFICACIÓN ===
+from gui.plot import plot_layout
+from gui.evolution_plot import plot_evolution
 import numpy as np
 import sys
 import io
@@ -27,7 +31,7 @@ class SolutionDialog(QDialog):
         self.compatibility_matrix = compatibility_matrix
         
         self.setWindowTitle("Mejores Soluciones Encontradas")
-        self.setMinimumSize(900, 700) # Aumentar tamaño para el resumen
+        self.setMinimumSize(900, 700)
         
         self.setup_ui()
     
@@ -54,7 +58,6 @@ class SolutionDialog(QDialog):
         button_layout.addWidget(close_button)
         layout.addLayout(button_layout)
     
-    # === INICIO DE LA MODIFICACIÓN: Restauración y mejora del resumen detallado ===
     def create_solution_tab(self, solution, solution_num):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -114,7 +117,6 @@ class SolutionDialog(QDialog):
             dist_opt = student.distancia_optima
             error_vision = abs(dist_real - dist_opt) if dist_opt > 0 else 0.0
             
-            # Calcular distancia promedio a compañeros incompatibles
             incompatible_distances = []
             for j in range(len(self.students)):
                 if self.compatibility_matrix[i][j] == 1:
@@ -154,18 +156,15 @@ class SolutionDialog(QDialog):
         report_html += f"<p><b>Puntuación de Fitness Final: {fitness_score:.4f}</b> (un valor más cercano a 0 es mejor).</p>"
         report_html += "<ul>"
         
-        # Generar justificaciones
         for name, metrics in sorted(student_metrics.items()):
-            # Justificación de visión
             if metrics['dist_opt'] > 0:
-                if metrics['error_vision'] < 0.5: # Umbral de error bajo
+                if metrics['error_vision'] < 0.5:
                     report_html += f"<li><b>{name}</b> ({metrics['seat']}) está <b>excelentemente ubicado</b> para su visión (error de solo {metrics['error_vision']:.2f} m).</li>"
-                elif metrics['error_vision'] < 1.5: # Umbral de error aceptable
+                elif metrics['error_vision'] < 1.5:
                      report_html += f"<li><b>{name}</b> ({metrics['seat']}) tiene una <b>buena ubicación</b> para su visión (error de {metrics['error_vision']:.2f} m).</li>"
 
-            # Justificación de compatibilidad
             if metrics['avg_dist_incompatible'] != -1:
-                if metrics['avg_dist_incompatible'] > 2.0: # Umbral de buena separación
+                if metrics['avg_dist_incompatible'] > 2.0:
                     report_html += f"<li><b>{name}</b> ({metrics['seat']}) está <b>bien separado</b> de sus compañeros incompatibles (distancia promedio {metrics['avg_dist_incompatible']:.2f}).</li>"
                 else:
                     report_html += f"<li><font color='orange'>Advertencia:</font> <b>{name}</b> ({metrics['seat']}) está <b>cerca</b> de uno o más compañeros incompatibles. Esto puede ser un compromiso necesario para optimizar otros factores.</li>"
@@ -178,7 +177,6 @@ class SolutionDialog(QDialog):
         
         scroll.setWidget(main_widget)
         return scroll
-    # === FIN DE LA MODIFICACIÓN ===
 
     def plot_current_solution(self):
         current_index = self.tab_widget.currentIndex()

@@ -7,21 +7,17 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
     
     fig, ax = plt.subplots(figsize=(12, 8))
     
-    # Configurar el fondo
     fig.patch.set_facecolor('#f8f9fa')
     ax.set_facecolor('#ffffff')
     
-    # Obtener dimensiones del aula
     max_row = max(r for r, c in seats)
     max_col = max(c for r, c in seats)
     
-    # --- Dibujar pizarrón ---
     board_width = max_col + 0.5
     board_height = 0.6
     board_x = 0.25
     board_y = 0.5
     
-    # Pizarrón con sombra
     shadow = FancyBboxPatch(
         (board_x + 0.05, board_y - 0.05), board_width, board_height,
         boxstyle="round,pad=0.1", facecolor='gray', alpha=0.3
@@ -38,13 +34,11 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
             "📋 PIZARRÓN", ha='center', va='center', 
             fontsize=14, fontweight='bold', color='white')
     
-    # --- mapeo de estudiantes por asiento ---
     student_by_seat = {}
     for i, seat_idx in enumerate(assignment):
         seat = seats[seat_idx]
         student_by_seat[seat] = students[i]
     
-    # --- Dibujar asientos ---
     seat_size = 0.8
     margin = 0.1
     
@@ -52,34 +46,34 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
         for col in range(1, max_col + 1):
             seat_pos = (row, col)
             
-            # Posición en el gráfico (invertir fila para que 1 esté arriba)
             x = col - 1 + margin
             y = -(row - 1) - 0.5
             
             if seat_pos in student_by_seat:
                 student = student_by_seat[seat_pos]
                 
-                # Colores y símbolos por tipo de visión
-                if student.vision == "no_far":
+                # === INICIO DE LA MODIFICACIÓN: Lógica de visualización actualizada ===
+                dist_opt = student.distancia_optima
+                if dist_opt > 0 and dist_opt <= 4.0:
                     color = '#ffcdd2'
                     edge_color = '#d32f2f'
                     symbol = '👓'
-                    vision_text = 'No ve lejos'
-                elif student.vision == "no_near":
+                    vision_text = f'D.Opt: {dist_opt}m'
+                elif dist_opt > 4.0:
                     color = '#bbdefb'
                     edge_color = '#1976d2'
                     symbol = '🔍'
-                    vision_text = 'No ve cerca'
+                    vision_text = f'D.Opt: {dist_opt}m'
                 else:
                     color = '#e8f5e8'
                     edge_color = '#388e3c'
                     symbol = '👀'
-                    vision_text = 'Visión normal'
-                
+                    vision_text = 'Visión Normal'
+                # === FIN DE LA MODIFICACIÓN ===
+
                 shadow_chair = Rectangle((x + 0.02, y - 0.02), seat_size, seat_size, facecolor='gray', alpha=0.3)
                 ax.add_patch(shadow_chair)
                 
-                # Silla principal
                 chair = FancyBboxPatch(
                     (x, y), seat_size, seat_size,
                     boxstyle="round,pad=0.05", 
@@ -106,7 +100,6 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
                        '🪑\nVacío', ha='center', va='center', 
                        fontsize=8, color='#999', style='italic')
     
-    # --- Configurar ejes ---
     ax.set_xlim(-0.2, max_col + 0.3)
     ax.set_ylim(-max_row - 0.3, 1.5)
     
@@ -127,9 +120,9 @@ def plot_layout(seats, assignment, students, title="Distribución Optimizada de 
     plt.title(title, fontsize=16, fontweight='bold', pad=20, color='#2E86AB')
     
     legend_elements = [
-        mpatches.Patch(color='#ffcdd2', label='👓 No ve bien de lejos'),
-        mpatches.Patch(color='#bbdefb', label='🔍 No ve bien de cerca'),
-        mpatches.Patch(color='#e8f5e8', label='👀 Visión normal'),
+        mpatches.Patch(color='#ffcdd2', label='👓 Necesita estar cerca (<= 4m)'),
+        mpatches.Patch(color='#bbdefb', label='🔍 Necesita estar lejos (> 4m)'),
+        mpatches.Patch(color='#e8f5e8', label='👀 Visión Normal'),
         mpatches.Patch(color='#f5f5f5', label='🪑 Asiento vacío')
     ]
     
