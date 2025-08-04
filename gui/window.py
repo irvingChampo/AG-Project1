@@ -1,31 +1,33 @@
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSpinBox, QLineEdit, QListWidget, QComboBox, QMessageBox,
-    QDialog, QCheckBox, QDialogButtonBox, QTextEdit,
-    QTabWidget, QScrollArea, QGridLayout, QFrame, QGroupBox
+    QDialog, QCheckBox, QDialogButtonBox, QDoubleSpinBox,
+    QTabWidget, QScrollArea, QGridLayout, QFrame, QGroupBox,
+    QTableWidget, QTableWidgetItem, QTextEdit
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QFont
 from core.models import Student
-from core.genetic import run_ga
-from gui.plot import plot_layout
-from gui.evolution_plot import plot_evolution
+from core.genetic import run_ga, evaluate
 import numpy as np
 import sys
 import io
 import os
 import csv
+import math
 
 class SolutionDialog(QDialog):
     
-    def __init__(self, solutions, students, seats, compatibility_matrix, parent=None):
+    def __init__(self, solutions, students, seats, seat_distances, compatibility_matrix, parent=None):
         super().__init__(parent)
         self.solutions = solutions
         self.students = students
         self.seats = seats
+        self.seat_distances = seat_distances
         self.compatibility_matrix = compatibility_matrix
         
         self.setWindowTitle("Mejores Soluciones Encontradas")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(900, 700) # Aumentar tamaño para el resumen
         
         self.setup_ui()
     
@@ -52,12 +54,14 @@ class SolutionDialog(QDialog):
         button_layout.addWidget(close_button)
         layout.addLayout(button_layout)
     
+    # === INICIO DE LA MODIFICACIÓN: Restauración y mejora del resumen detallado ===
     def create_solution_tab(self, solution, solution_num):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
 
+        # --- Parte 1: Plano Visual de Asientos ---
         assignment_frame = QGroupBox("🪑 Asignación de Asientos")
         assignment_layout = QVBoxLayout(assignment_frame)
         
@@ -77,8 +81,9 @@ class SolutionDialog(QDialog):
                 seat_pos = (row, col)
                 student = students_by_seat.get(seat_pos)
                 if student:
-                    if student.vision == "no_far": bg_color, icon, border_color = "#ffcdd2", "👓", "#d32f2f"
-                    elif student.vision == "no_near": bg_color, icon, border_color = "#bbdefb", "🔍", "#1976d2"
+                    dist_opt = student.distancia_optima
+                    if dist_opt > 0 and dist_opt <= 4.0: bg_color, icon, border_color = "#ffcdd2", "👓", "#d32f2f"
+                    elif dist_opt > 4.0: bg_color, icon, border_color = "#bbdefb", "🔍", "#1976d2"
                     else: bg_color, icon, border_color = "#e8f5e9", "👀", "#388e3c"
                     seat_label = QLabel(f"{icon}\n{student.name}")
                     seat_label.setStyleSheet(f"background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 4px; padding: 5px; font-size: 10px; min-width: 80px; min-height: 40px;")
@@ -90,8 +95,90 @@ class SolutionDialog(QDialog):
         
         assignment_layout.addLayout(grid_layout)
         layout.addWidget(assignment_frame)
+
+        # --- Parte 2: Desglose y Análisis Detallado ---
+        analysis_frame = QGroupBox("📊 Análisis Detallado de la Solución")
+        analysis_layout = QVBoxLayout(analysis_frame)
+
+        # 2.1 Tabla de Métricas por Estudiante
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(["Estudiante", "Asiento (F, C)", "Distancia Real", "Distancia Óptima", "Error Visión", "Dist. a Incompatibles"])
+        table.setRowCount(len(self.students))
+
+        student_metrics = {}
+        for i, seat_idx in enumerate(solution):
+            student = self.students[i]
+            seat_pos = self.seats[seat_idx]
+            dist_real = self.seat_distances[seat_pos]
+            dist_opt = student.distancia_optima
+            error_vision = abs(dist_real - dist_opt) if dist_opt > 0 else 0.0
+            
+            # Calcular distancia promedio a compañeros incompatibles
+            incompatible_distances = []
+            for j in range(len(self.students)):
+                if self.compatibility_matrix[i][j] == 1:
+                    other_seat_idx = solution[j]
+                    other_seat_pos = self.seats[other_seat_idx]
+                    dist_euc = math.sqrt((seat_pos[0] - other_seat_pos[0])**2 + (seat_pos[1] - other_seat_pos[1])**2)
+                    incompatible_distances.append(dist_euc)
+            
+            avg_dist_incompatible = np.mean(incompatible_distances) if incompatible_distances else -1
+            student_metrics[student.name] = {
+                'seat': f"F{seat_pos[0]}, C{seat_pos[1]}",
+                'error_vision': error_vision,
+                'avg_dist_incompatible': avg_dist_incompatible,
+                'dist_opt': dist_opt
+            }
+
+            table.setItem(i, 0, QTableWidgetItem(student.name))
+            table.setItem(i, 1, QTableWidgetItem(f"F{seat_pos[0]}, C{seat_pos[1]}"))
+            table.setItem(i, 2, QTableWidgetItem(f"{dist_real:.2f} m"))
+            table.setItem(i, 3, QTableWidgetItem(f"{dist_opt:.2f} m" if dist_opt > 0 else "N/A"))
+            table.setItem(i, 4, QTableWidgetItem(f"{error_vision:.2f} m"))
+            dist_incomp_str = f"{avg_dist_incompatible:.2f}" if avg_dist_incompatible != -1 else "N/A"
+            table.setItem(i, 5, QTableWidgetItem(dist_incomp_str))
+
+        table.resizeColumnsToContents()
+        table.setFixedHeight(300)
+        analysis_layout.addWidget(table)
+        
+        # 2.2 Reporte Interpretativo
+        report_text = QTextEdit()
+        report_text.setReadOnly(True)
+        
+        temp_individual = type('Individual', (object,), {'chromosome': solution})()
+        fitness_score = evaluate(temp_individual, self.students, self.seats, self.compatibility_matrix, self.seat_distances, max(self.seat_distances.values()))
+        
+        report_html = f"<h3>Reporte de la Solución</h3>"
+        report_html += f"<p><b>Puntuación de Fitness Final: {fitness_score:.4f}</b> (un valor más cercano a 0 es mejor).</p>"
+        report_html += "<ul>"
+        
+        # Generar justificaciones
+        for name, metrics in sorted(student_metrics.items()):
+            # Justificación de visión
+            if metrics['dist_opt'] > 0:
+                if metrics['error_vision'] < 0.5: # Umbral de error bajo
+                    report_html += f"<li><b>{name}</b> ({metrics['seat']}) está <b>excelentemente ubicado</b> para su visión (error de solo {metrics['error_vision']:.2f} m).</li>"
+                elif metrics['error_vision'] < 1.5: # Umbral de error aceptable
+                     report_html += f"<li><b>{name}</b> ({metrics['seat']}) tiene una <b>buena ubicación</b> para su visión (error de {metrics['error_vision']:.2f} m).</li>"
+
+            # Justificación de compatibilidad
+            if metrics['avg_dist_incompatible'] != -1:
+                if metrics['avg_dist_incompatible'] > 2.0: # Umbral de buena separación
+                    report_html += f"<li><b>{name}</b> ({metrics['seat']}) está <b>bien separado</b> de sus compañeros incompatibles (distancia promedio {metrics['avg_dist_incompatible']:.2f}).</li>"
+                else:
+                    report_html += f"<li><font color='orange'>Advertencia:</font> <b>{name}</b> ({metrics['seat']}) está <b>cerca</b> de uno o más compañeros incompatibles. Esto puede ser un compromiso necesario para optimizar otros factores.</li>"
+
+        report_html += "</ul>"
+        report_text.setHtml(report_html)
+        analysis_layout.addWidget(report_text)
+        
+        layout.addWidget(analysis_frame)
+        
         scroll.setWidget(main_widget)
         return scroll
+    # === FIN DE LA MODIFICACIÓN ===
 
     def plot_current_solution(self):
         current_index = self.tab_widget.currentIndex()
@@ -134,19 +221,17 @@ class SeatPlanApp:
         scroll_area.setWidget(content_widget)
         content_layout = QVBoxLayout(content_widget)
 
-        # === INICIO DE LA MODIFICACIÓN: Cambio de SpinBox a ComboBox para el aula ===
         aula_box, aula_layout = self._create_group_box("🏫 Configuración del Aula")
         aula_config_layout = QHBoxLayout()
         aula_config_layout.addWidget(QLabel("Selecciona el tamaño del aula:"))
         self.aula_input = QComboBox()
         self.aula_input.addItems([
-            "Opción 1: 5 Filas x 6 Columnas (30 asientos)",
-            "Opción 2: 8 Filas x 5 Columnas (40 asientos)"
+            "5 Filas x 6 Columnas (30 asientos)",
+            "8 Filas x 5 Columnas (40 asientos)"
         ])
         aula_config_layout.addWidget(self.aula_input)
         aula_layout.addLayout(aula_config_layout)
         content_layout.addWidget(aula_box)
-        # === FIN DE LA MODIFICACIÓN ===
 
         students_box, students_layout = self._create_group_box("👥 Gestión de Estudiantes")
         form_layout = QGridLayout()
@@ -154,13 +239,16 @@ class SeatPlanApp:
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Nombre del estudiante")
         form_layout.addWidget(self.name_input, 0, 1)
-        form_layout.addWidget(QLabel("Tipo de Visión:"), 1, 0)
-        self.vision_input = QComboBox()
-        self.vision_input.addItems(["👀 Normal", "👓 No ve bien de lejos", "🔍 No ve bien de cerca"])
-        self.vision_input.setItemData(0, "normal")
-        self.vision_input.setItemData(1, "no_far")
-        self.vision_input.setItemData(2, "no_near")
-        form_layout.addWidget(self.vision_input, 1, 1)
+        
+        form_layout.addWidget(QLabel("Distancia Óptima (metros):"), 1, 0)
+        self.distancia_input = QDoubleSpinBox()
+        self.distancia_input.setSuffix(" m")
+        self.distancia_input.setRange(0, 20)
+        self.distancia_input.setSingleStep(0.5)
+        self.distancia_input.setDecimals(1)
+        self.distancia_input.setToolTip("Ingrese la distancia ideal a la que el estudiante ve bien.\nUse 0.0 m para visión normal (será ignorado).")
+        form_layout.addWidget(self.distancia_input, 1, 1)
+
         students_layout.addLayout(form_layout)
         
         add_buttons_layout = QHBoxLayout()
@@ -262,7 +350,7 @@ class SeatPlanApp:
             QPushButton#runButton:hover {
                 background-color: #388E3C;
             }
-            QLineEdit, QComboBox, QSpinBox {
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
                 padding: 6px;
                 border: 1px solid #ddd;
                 border-radius: 4px;
@@ -286,8 +374,8 @@ class SeatPlanApp:
 
     def add_student(self):
         name = self.name_input.text().strip()
-        vision_text = self.vision_input.currentText()
-        vision_data = self.vision_input.itemData(self.vision_input.currentIndex())
+        distancia_optima = self.distancia_input.value()
+        
         if not name:
             QMessageBox.warning(self.window, "Entrada Inválida", "Por favor, ingresa un nombre para el estudiante.")
             return
@@ -296,8 +384,14 @@ class SeatPlanApp:
             return
         
         student_index = len(self.students)
-        self.students.append(Student(name, vision_data, student_index))
+        self.students.append(Student(name, distancia_optima, student_index))
+        
+        if distancia_optima == 0:
+            vision_text = "👀 Visión Normal"
+        else:
+            vision_text = f"🎯 Dist. Óptima: {distancia_optima} m"
         display_text = f"[ID: {student_index}] {vision_text} - {name}"
+        
         self.students_list.addItem(display_text)
         self.name_input.clear()
         self.name_input.setFocus()
@@ -310,10 +404,15 @@ class SeatPlanApp:
         if current_row >= 0:
             self.students_list.takeItem(current_row)
             self.students.pop(current_row)
-            for i, student in enumerate(self.students):
+            for i in range(self.students_list.count()):
+                student = self.students[i]
                 student.index = i
-                item_text = self.students_list.item(i).text().split('] ', 1)[1]
-                self.students_list.item(i).setText(f"[ID: {i}] {item_text}")
+                distancia_optima = student.distancia_optima
+                if distancia_optima == 0:
+                    vision_text = "👀 Visión Normal"
+                else:
+                    vision_text = f"🎯 Dist. Óptima: {distancia_optima} m"
+                self.students_list.item(i).setText(f"[ID: {i}] {vision_text} - {student.name}")
             self.compat_matrix = None
             self.compat_status.setText("❌ Compatibilidades no definidas")
             self.compat_status.setStyleSheet("color: #d32f2f; font-weight: bold;")
@@ -345,21 +444,23 @@ class SeatPlanApp:
             students_file = os.path.join(base_dir, 'datasets', 'students_dataset.csv')
             compat_file = os.path.join(base_dir, 'datasets', 'compatibility_dataset.csv')
             
-            vision_text_map = {"normal": "👀 Normal", "no_far": "👓 No ve bien de lejos", "no_near": "🔍 No ve bien de cerca"}
-            
             id_from_file_to_index = {}
             with open(students_file, mode='r', encoding='utf-8') as infile:
                 reader = csv.DictReader(infile)
                 for row in reader:
                     file_id = row['id'].strip()
                     name = row['name'].strip()
-                    vision = row['vision'].strip()
+                    distancia_optima = float(row['distancia_optima'].strip())
                     
                     student_index = len(self.students)
-                    self.students.append(Student(name, vision, student_index))
+                    self.students.append(Student(name, distancia_optima, student_index))
                     id_from_file_to_index[file_id] = student_index
                     
-                    display_text = f"[ID: {student_index}] {vision_text_map.get(vision, vision)} - {name}"
+                    if distancia_optima == 0:
+                        vision_text = "👀 Visión Normal"
+                    else:
+                        vision_text = f"🎯 Dist. Óptima: {distancia_optima} m"
+                    display_text = f"[ID: {student_index}] {vision_text} - {name}"
                     self.students_list.addItem(display_text)
 
             num_students = len(self.students)
@@ -378,9 +479,7 @@ class SeatPlanApp:
                         self.compat_matrix[idx2, idx1] = 1
                         compat_pairs_count += 1
             
-            # === INICIO DE LA MODIFICACIÓN: Seleccionar opción de aula por defecto ===
-            self.aula_input.setCurrentIndex(0) # Selecciona "Opción 1: 5x6"
-            # === FIN DE LA MODIFICACIÓN ===
+            self.aula_input.setCurrentIndex(0)
             
             self.compat_status.setText(f"✅ {compat_pairs_count} parejas conflictivas cargadas")
             self.compat_status.setStyleSheet("color: #2E7D32; font-weight: bold;")
@@ -438,37 +537,28 @@ class SeatPlanApp:
             self.compat_status.setText(f"✅ {compatible_pairs} parejas conflictivas definidas")
             self.compat_status.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
-    # === INICIO DE LA MODIFICACIÓN: Lógica para configurar aula y distancias ===
     def optimize_seats(self):
         if not self.students:
             QMessageBox.warning(self.window, "Error", "No hay estudiantes agregados en la lista.")
             return
 
-        # 1. Determinar dimensiones y distancias del aula
         selected_index = self.aula_input.currentIndex()
-        if selected_index == 0: # Opción 1: 5x6
+        if selected_index == 0:
             rows, cols = 5, 6
-            distancia_inicial = 2 # metros
-            distancia_entre_filas = 1 # metro
-        else: # Opción 2: 8x5
+        else:
             rows, cols = 8, 5
-            distancia_inicial = 1 # metro
-            distancia_entre_filas = 1 # metro
+        
+        distancia_inicial = 2.0
+        distancia_entre_filas = 1.0
 
         total_seats = rows * cols
         if total_seats < len(self.students):
             QMessageBox.critical(self.window, "Error de Capacidad", f"El aula seleccionada ({total_seats} asientos) no tiene suficientes lugares para los {len(self.students)} estudiantes.")
             return
             
-        # 2. Crear la lista de asientos y el diccionario de distancias en metros
         seats = [(r + 1, c + 1) for r in range(rows) for c in range(cols)]
-        seat_distances = {}
-        for r in range(rows):
-            distancia_fila = distancia_inicial + (r * distancia_entre_filas)
-            for c in range(cols):
-                seat_distances[(r + 1, c + 1)] = distancia_fila
+        seat_distances = { (r + 1, c + 1): distancia_inicial + (r * distancia_entre_filas) for r in range(rows) for c in range(cols) }
 
-        # 3. Resto de la lógica (sin cambios)
         if self.compat_matrix is None:
             reply = QMessageBox.question(self.window, "Aviso de Compatibilidad", 
                                          "No has definido las compatibilidades. ¿Deseas continuar asumiendo que ningún estudiante se distrae con otro?",
@@ -496,9 +586,8 @@ class SeatPlanApp:
             self.progress_label.setText("✅ ¡Optimización completada!")
 
         if solutions:
-            SolutionDialog(solutions, self.students, seats, self.compat_matrix, self.window).exec()
+            SolutionDialog(solutions, self.students, seats, seat_distances, self.compat_matrix, self.window).exec()
             if logbook:
                 plot_evolution(logbook)
         else:
             QMessageBox.warning(self.window, "Sin Resultados", "El algoritmo no pudo encontrar una solución válida. Intenta de nuevo o ajusta los parámetros.")
-    # === FIN DE LA MODIFICACIÓN ===
