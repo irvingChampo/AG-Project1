@@ -24,40 +24,21 @@ def penalizacion_vision(individual_chromosome, students, seats, seat_distances):
             students_with_needs += 1
     return total_error / max(students_with_needs, 1)
 
-# === INICIO DE LA MODIFICACIÓN: Nueva lógica de 8 Vecinos ===
 def penalizacion_compatibilidad(individual_chromosome, students, seats, compatibility_matrix):
-    """
-    Calcula una penalización si dos estudiantes INCOMPATIBLES son vecinos directos
-    (en cualquiera de las 8 direcciones).
-    """
     total_penalty = 0
-    # Este contador sirve para normalizar la penalización total.
-    # Cuenta el número total de parejas incompatibles definidas en el dataset.
     incompatible_pairs_count = 0 
     n = len(individual_chromosome)
     for i in range(n):
         for j in range(i + 1, n):
-            # 1. Verificar si los estudiantes i y j son INCOMPATIBLES
             if compatibility_matrix[i][j] == 1:
                 incompatible_pairs_count += 1
-
-                # Obtener las coordenadas (fila, columna) de cada estudiante
                 seat_i_coords = seats[individual_chromosome[i]]
                 seat_j_coords = seats[individual_chromosome[j]]
-
-                # 2. Verificar si son vecinos bajo la regla de 8 vecinos (Vecindad de Moore)
                 row_diff = abs(seat_i_coords[0] - seat_j_coords[0])
                 col_diff = abs(seat_i_coords[1] - seat_j_coords[1])
-
-                # Si la diferencia en filas Y columnas es 1 o menos, son vecinos.
                 if row_diff <= 1 and col_diff <= 1:
-                    # 3. Aplicar una penalización alta y fija si son vecinos e incompatibles.
                     total_penalty += 50.0
-    
-    # La penalización total se divide por el número total de parejas incompatibles.
-    # Esto da un "castigo promedio por cada relación conflictiva".
     return total_penalty / max(incompatible_pairs_count, 1)
-# === FIN DE LA MODIFICACIÓN ===
 
 def penalizacion_asientos_vacios(individual_chromosome, all_seats, seat_distances, d_max):
     occupied_seats_indices = set(individual_chromosome)
@@ -71,17 +52,31 @@ def penalizacion_asientos_vacios(individual_chromosome, all_seats, seat_distance
             empty_seat_count += 1
     return total_penalty / max(empty_seat_count, 1)
 
-def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, w1=0.4, w2=0.3, w3=0.3):
+def evaluate(individual, students, seats, compatibility_matrix, seat_distances, d_max, **kwargs):
+    """
+    Calcula el fitness basado en la fórmula: 1 / ((A+1)*(B+1)*(C+1)).
+    El objetivo es MINIMIZAR cada penalización, lo cual se logra MAXIMIZANDO la inversa del producto.
+    """
+    # 1. Calcular las tres penalizaciones (errores)
     v_penalty = penalizacion_vision(individual.chromosome, students, seats, seat_distances)
     c_penalty = penalizacion_compatibilidad(individual.chromosome, students, seats, compatibility_matrix)
     e_penalty = penalizacion_asientos_vacios(individual.chromosome, seats, seat_distances, d_max)
 
+    # 2. Normalizar cada penalización para que estén en una escala comparable.
+    #    Esto es MUY IMPORTANTE cuando se multiplican, para que un criterio no domine a los otros.
     vp_normalized = v_penalty / d_max
     cp_normalized = c_penalty / 50.0 
     ep_normalized = e_penalty / d_max 
 
-    total_penalty = (w1 * vp_normalized) + (w2 * cp_normalized) + (w3 * ep_normalized)
-    fitness = -total_penalty
+    # 3. Aplicar la fórmula del producto de las inversas
+    #    Se suma 1 a cada término para evitar que un cero anule todo y para prevenir la división por cero.
+    term1 = vp_normalized + 1
+    term2 = cp_normalized + 1
+    term3 = ep_normalized + 1
+    
+    # 4. Calcular el fitness final.
+    fitness = 1 / (term1 * term2 * term3)
+    
     return fitness
 
 # REPARACIÓN
@@ -133,7 +128,7 @@ def mutate_integer(individual, low, up, indpb):
 
 # FUNCIÓN PRINCIPAL DEL ALGORITMO GENÉTICO (run_ga) 
 def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
-           ngen=150, pop_size=200, w1=0.4, w2=0.3, w3=0.3, cxpb=0.8, mutpb=0.2):
+           ngen=150, pop_size=200, cxpb=0.8, mutpb=0.2, **kwargs): 
     
     num_students = len(students)
     seats_count = len(seats)
@@ -147,7 +142,7 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
     print("=== INICIANDO ALGORITMO GENÉTICO (IMPLEMENTACIÓN MANUAL) ===")
     for ind in population:
         repair(ind.chromosome, seats_count)
-        ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2, w3)
+        ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max)
 
     logbook = []
     hof = sorted(population, key=lambda ind: ind.fitness, reverse=True)[:3]
@@ -168,7 +163,7 @@ def run_ga(students, seats, compatibility_matrix, seat_distances, front_rows,
         
         for ind in offspring:
             repair(ind.chromosome, seats_count)
-            ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max, w1, w2, w3)
+            ind.fitness = evaluate(ind, students, seats, compatibility_matrix, seat_distances, d_max)
         
         population[:] = offspring
 
